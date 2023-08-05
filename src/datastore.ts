@@ -12,17 +12,24 @@ export type Band = {
     y: string
 }
 
+export type Metadata = {
+    blockNumbers: number[]
+}
+
 export class Database {
     private datastore = new Datastore()
 
-    kind(address: string) {
+    private kind(address: string) {
         return `${KIND_PREFIX}-${address}`
     }
 
+    private key(address: string, blockNumber: number) {
+        return this.datastore.key([this.kind(address), blockNumber])
+    }
+
     async storeAmm(amm: Amm, address: string) {
-        const key = this.datastore.key([this.kind(address), amm.blockNumber])
         const entity = {
-            key,
+            key: this.key(address, amm.blockNumber),
             data: {
                 ...amm,
             },
@@ -32,7 +39,22 @@ export class Database {
 
     async getLatestAmm(address: string): Promise<Amm | null> {
         const query = this.datastore.createQuery(this.kind(address)).order('blockNumber', { descending: true }).limit(1)
-        const [entities] = await this.datastore.runQuery(query)
-        return entities.length > 0 ? (entities[0] as Amm) : null
+        const [amms] = await this.datastore.runQuery(query)
+        return amms.length > 0 ? (amms[0] as Amm) : null
+    }
+
+    async getAmm(address: string, blockNumber: number): Promise<Amm | null> {
+        const amms = await this.datastore.get(this.key(address, blockNumber))
+        return amms.length > 0 ? (amms[0] as Amm) : null
+    }
+
+    async findAmmLeThanBlock(address: string, blockNumber: number): Promise<Amm | null> {
+        const query = this.datastore
+            .createQuery(this.kind(address))
+            .filter('blockNumber', '<=', blockNumber)
+            .order('blockNumber', { descending: true })
+            .limit(1)
+        const [amms] = await this.datastore.runQuery(query)
+        return amms.length > 0 ? (amms[0] as Amm) : null
     }
 }

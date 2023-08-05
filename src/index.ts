@@ -25,12 +25,11 @@ async function main() {
     const RPC_URL = process.env.RPC_URL as string
 
     const db = new Database()
-
     const api = new RestApi(PORT, db)
     api.start()
 
-    // const llammaFetcher = new LlammaFetcher(RPC_URL, db, POOLS)
-    // await llammaFetcher.start()
+    const llammaFetcher = new LlammaFetcher(RPC_URL, db, POOLS)
+    await llammaFetcher.start()
 }
 
 main()

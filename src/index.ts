@@ -1,31 +1,36 @@
-import express, { Request, Response } from 'express'
-export function sleep(ms: number): Promise<unknown> {
-    return new Promise(resolve => setTimeout(resolve, ms))
-}
+import 'dotenv/config'
+import { Database } from './datastore'
+import { LlammaFetcher } from './llamma'
+import { RestApi } from './api'
+
+const POOLS = [
+    {
+        name: 'sfrxETH',
+        address: '0x136e783846ef68C8Bd00a3369F787dF8d683a696',
+        createdBlockNumber: 17258064,
+    },
+]
 
 async function main() {
     if (!process.env.PORT) {
+        console.error('PORT not set')
+        process.exit(1)
+    }
+    if (!process.env.RPC_URL) {
+        console.error('RPC_URL not set')
         process.exit(1)
     }
 
     const PORT = parseInt(process.env.PORT as string, 10)
+    const RPC_URL = process.env.RPC_URL as string
 
-    const app = express()
-    app.use(express.json())
+    const db = new Database()
 
-    app.get('/', (req: Request, res: Response) => {
-        res.status(200).send('Hello World!')
-    })
+    const api = new RestApi(PORT, db)
+    api.start()
 
-    app.listen(PORT, () => {
-        console.log(`Listening on port ${PORT}`)
-    })
-
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-        console.log('HEllo world')
-        await sleep(10000)
-    }
+    // const llammaFetcher = new LlammaFetcher(RPC_URL, db, POOLS)
+    // await llammaFetcher.start()
 }
 
 main()

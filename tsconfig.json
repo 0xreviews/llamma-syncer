@@ -10,5 +10,6 @@
   "include": [
     "src/**/*",
     "test/**/*",
+    "src/types",
   ]
 }

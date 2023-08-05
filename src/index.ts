@@ -1,15 +1,8 @@
 import 'dotenv/config'
+
 import { Database } from './datastore'
 import { LlammaFetcher } from './llamma'
 import { RestApi } from './api'
-
-const POOLS = [
-    {
-        name: 'sfrxETH',
-        address: '0x136e783846ef68C8Bd00a3369F787dF8d683a696',
-        createdBlockNumber: 17258064,
-    },
-]
 
 async function main() {
     if (!process.env.PORT) {
@@ -28,8 +21,10 @@ async function main() {
     const api = new RestApi(PORT, db)
     api.start()
 
-    const llammaFetcher = new LlammaFetcher(RPC_URL, db, POOLS)
+    const llammaFetcher = new LlammaFetcher(RPC_URL, db)
     await llammaFetcher.start()
 }
 
-main()
+if (require.main === module) {
+    main()
+}

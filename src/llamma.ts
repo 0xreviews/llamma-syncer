@@ -113,7 +113,7 @@ export class LlammaFetcher {
             const amm = await this.db.getLatestAmm(market.amm)
 
             const fromBlock = amm ? amm.blockNumber + 1 : market.createdAtBlock
-            const latestBlock = fromBlock
+            const latestBlock = await this.provider.getBlockNumber()
             if (latestBlock < fromBlock + 300) {
                 console.log(`waiting for new blocks in pool ${market.amm}`)
                 await sleep(ONE_MINUTE)

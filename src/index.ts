@@ -18,11 +18,12 @@ async function main() {
     const RPC_URL = process.env.RPC_URL as string
 
     const db = new Database()
-    const api = new RestApi(PORT, db)
-    api.start()
 
     const llammaFetcher = new LlammaFetcher(RPC_URL, db)
-    await llammaFetcher.start()
+    llammaFetcher.start()
+
+    const api = new RestApi(PORT, db, llammaFetcher)
+    api.start()
 }
 
 if (require.main === module) {

@@ -6,8 +6,12 @@ import { Database, Band, Amm } from './datastore'
 import { sleep } from './utils'
 import { MULTI_CALLER_ADDRESS, ONE_DAY, ONE_MINUTE } from './constants'
 
-interface Pool {
-    address: string
+interface Market {
+    id: number
+    collateral: string
+    controller: string
+    amm: string
+    monetaryPolicy: string
     createdAtBlock: number
 }
 
@@ -18,7 +22,7 @@ function parseIn256(bytes: string, name?: string): number {
 export class LlammaFetcher {
     private readonly provider: JsonRpcProvider
     private readonly multicall: Multicaller
-    private pools: Record<string, Pool> = {}
+    markets: Record<number, Market> = {}
 
     constructor(
         rpcUrl: string,
@@ -31,7 +35,7 @@ export class LlammaFetcher {
 
     // fetch from controller factory contract address: 0xC9332fdCB1C491Dcc683bAe86Fe3cb70360738BC
     // factory contract created at block 17257955
-    private async fetchLlammaPools(fromBlock = 17257955): Promise<Record<string, Pool>> {
+    private async fetchLlammaMarkets(fromBlock = 17257955): Promise<Record<string, Market>> {
         const factoryAbi = [
             'event AddMarket(address indexed collateral, address controller, address amm, address monetary_policy, uint256 id)',
         ]
@@ -41,13 +45,23 @@ export class LlammaFetcher {
 
         const logs = await this.provider.getLogs(filter)
         const abiCoder = ethers.AbiCoder.defaultAbiCoder()
-        const pools: Record<string, Pool> = {}
+        const markets: Record<string, Market> = {}
         logs.map(log => {
-            const result = abiCoder.decode(['address', 'address', 'address', 'uint256'], log.data)
-            const address = result[1]
-            pools[address] = { address, createdAtBlock: log.blockNumber }
+            const collateral = log.topics[1].substring(26)
+            const [controller, amm, monetaryPolicy, id] = abiCoder.decode(
+                ['address', 'address', 'address', 'uint256'],
+                log.data,
+            )
+            markets[Number(id)] = {
+                id: Number(id),
+                collateral,
+                controller,
+                amm,
+                monetaryPolicy,
+                createdAtBlock: log.blockNumber,
+            }
         })
-        return pools
+        return markets
     }
 
     private async fetchBands(address: string, blockNumber: number): Promise<Record<number, Band>> {
@@ -82,26 +96,26 @@ export class LlammaFetcher {
         return bands
     }
 
-    async fetchAmmStates(pool: Pool) {
+    async fetchAmmStates(market: Market) {
         const abiCoder = ethers.AbiCoder.defaultAbiCoder()
         const ammAbi = [
             'event TokenExchange(address indexed buyer, uint256 sold_id, uint256 tokens_sold, uint256 bought_id, uint256 tokens_bought)',
             'event Deposit(address indexed provider, uint256 amount, int256 n1, int256 n2)',
             'event Withdraw(address indexed, uint256 amount_borrowed, uint256 amount_collateral)',
         ]
-        const contract = new Contract(pool.address, ammAbi)
+        const contract = new Contract(market.amm, ammAbi)
         const exchangeTopic = (await contract.filters.TokenExchange().getTopicFilter())[0] as string
         const depositTopic = (await contract.filters.Deposit().getTopicFilter())[0] as string
         const withdrawTopic = (await contract.filters.Withdraw().getTopicFilter())[0] as string
 
         // eslint-disable-next-line no-constant-condition
         while (true) {
-            const amm = await this.db.getLatestAmm(pool.address)
+            const amm = await this.db.getLatestAmm(market.amm)
 
-            const fromBlock = amm ? amm.blockNumber + 1 : pool.createdAtBlock
-            const latestBlock = await this.provider.getBlockNumber()
+            const fromBlock = amm ? amm.blockNumber + 1 : market.createdAtBlock
+            const latestBlock = fromBlock
             if (latestBlock < fromBlock + 300) {
-                console.log(`waiting for new blocks in pool ${pool.address}`)
+                console.log(`waiting for new blocks in pool ${market.amm}`)
                 await sleep(ONE_MINUTE)
                 continue
             }
@@ -110,11 +124,11 @@ export class LlammaFetcher {
             const filter = {
                 fromBlock,
                 toBlock,
-                address: pool.address,
+                address: market.amm,
                 topics: [[exchangeTopic, depositTopic, withdrawTopic]],
             }
             const logs = await this.provider.getLogs(filter)
-            console.log(`found ${logs.length} events in pool ${pool.address} from ${fromBlock} to ${toBlock}`)
+            console.log(`found ${logs.length} events in pool ${market.amm} from ${fromBlock} to ${toBlock}`)
             if (logs.length === 0) {
                 await sleep(ONE_MINUTE)
                 continue
@@ -135,9 +149,9 @@ export class LlammaFetcher {
                 .value()
 
             for (const blockNumber of blockNumbers) {
-                const bands = await this.fetchBands(pool.address, blockNumber)
+                const bands = await this.fetchBands(market.amm, blockNumber)
                 const amm = { blockNumber, bands, totalShares: {}, userShares: {} } as Amm
-                const lastAmm = await this.db.findAmmLeThanBlock(pool.address, blockNumber)
+                const lastAmm = await this.db.findAmmLeThanBlock(market.amm, blockNumber)
                 if (lastAmm) {
                     amm.totalShares = lastAmm.totalShares
                     amm.userShares = lastAmm.userShares
@@ -168,7 +182,7 @@ export class LlammaFetcher {
                     }
                 }
 
-                await this.db.storeAmm(amm, pool.address)
+                await this.db.storeAmm(amm, market.amm)
             }
         }
     }
@@ -178,16 +192,16 @@ export class LlammaFetcher {
 
         // eslint-disable-next-line no-constant-condition
         while (true) {
-            const pools = await this.fetchLlammaPools(lastBlock)
+            const markets = await this.fetchLlammaMarkets(lastBlock)
             lastBlock = await this.provider.getBlockNumber()
-            console.log(`Found LLAMMA pools: ${JSON.stringify(pools)}`)
+            console.log(`Found LLAMMA markets: ${JSON.stringify(markets)}`)
 
-            for (const [address, pool] of Object.entries(pools)) {
-                if (this.pools[address]) {
+            for (const [id, market] of Object.entries(markets)) {
+                if (this.markets[id]) {
                     continue
                 }
-                this.pools[address] = pool
-                this.fetchAmmStates(pool)
+                this.markets[id] = market
+                this.fetchAmmStates(market)
             }
 
             await sleep(ONE_DAY)

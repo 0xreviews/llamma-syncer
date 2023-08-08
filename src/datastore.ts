@@ -5,6 +5,8 @@ const KIND_PREFIX = 'LLAMMA'
 export type Amm = {
     blockNumber: number
     bands: Record<number, Band>
+    totalShares: Record<number, string>
+    userShares: Record<string, Record<number, string>>
 }
 
 export type Band = {

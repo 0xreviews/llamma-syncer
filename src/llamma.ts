@@ -8,9 +8,9 @@ import { MULTI_CALLER_ADDRESS, ONE_DAY, ONE_MINUTE } from './constants'
 
 interface Market {
     id: number
+    amm: string
     collateral: string
     controller: string
-    amm: string
     monetaryPolicy: string
     createdAtBlock: number
 }
@@ -20,7 +20,7 @@ function parseIn256(bytes: string, name?: string): number {
 }
 
 function bytes32ToAddress(bytes: string): string {
-    return '0x' + bytes.substring(26)
+    return ethers.getAddress('0x' + bytes.substring(26))
 }
 
 function parseWei(value: string): bigint {
@@ -101,11 +101,26 @@ export class LlammaFetcher {
             const x = fromTwos(results[i], 256)
             const y = fromTwos(results[i + 1], 256)
             if (x.toString() !== '0' || y.toString() !== '0') {
-                bands[minBand + i / 2] = { x: formatEther(x), y: formatEther(y) }
+                bands[minBand + i / 2] = { x: formatEther(x), y: formatEther(y), users: [] }
             }
             i += 2
         }
         return bands
+    }
+
+    private mergeBandsReserves(origBands: Record<number, Band>, newBands: Record<number, Band>) {
+        const mergedBands = Object.assign({}, origBands)
+        for (const [id, band] of Object.entries(newBands)) {
+            if (!mergedBands[id]) {
+                // update bands reserves with empty users list
+                mergedBands[id] = band
+            } else {
+                // update bands reserves with the original users list
+                mergedBands[id].x = band.x
+                mergedBands[id].y = band.y
+            }
+        }
+        return mergedBands
     }
 
     async fetchAmmStates(market: Market) {
@@ -121,6 +136,7 @@ export class LlammaFetcher {
         const withdrawTopic = (await contract.filters.Withdraw().getTopicFilter())[0] as string
 
         let latestAmm = await this.db.getLatestAmm(market.amm)
+        console.log('latestAmm', latestAmm ? `exists on block ${latestAmm.blockNumber}` : 'not exists')
         // eslint-disable-next-line no-constant-condition
         while (true) {
             const fromBlock = latestAmm ? latestAmm.blockNumber + 1 : market.createdAtBlock
@@ -160,11 +176,14 @@ export class LlammaFetcher {
                 .value()
 
             for (const blockNumber of blockNumbers) {
+                const amm = { blockNumber, bands: {}, totalShares: {}, userShares: {} } as Amm
                 const bands = await this.fetchBands(market.amm, blockNumber)
-                const amm = { blockNumber, bands, totalShares: {}, userShares: {} } as Amm
                 if (latestAmm) {
+                    amm.bands = this.mergeBandsReserves(latestAmm.bands, bands)
                     amm.totalShares = latestAmm.totalShares
                     amm.userShares = latestAmm.userShares
+                } else {
+                    amm.bands = bands
                 }
 
                 const logsInBlock = _.sortBy(logsMap[blockNumber].logs, 'index')
@@ -177,6 +196,8 @@ export class LlammaFetcher {
                         const amountPerBand = (amount as bigint) / ((n2 as bigint) - (n1 as bigint) + BigInt(1))
 
                         for (let i = n1; i <= n2; i++) {
+                            amm.bands[i].users = amm.bands[i].users ? _.uniq([...amm.bands[i].users, user]) : [user]
+
                             amm.totalShares[i] = amm.totalShares[i]
                                 ? formatWei(parseWei(amm.totalShares[i]) + amountPerBand)
                                 : formatWei(amountPerBand)
@@ -186,6 +207,12 @@ export class LlammaFetcher {
                         }
                     } else {
                         for (const [i, s] of Object.entries(amm.userShares[user])) {
+                            if (amm.bands[i]) {
+                                const usersSet = new Set(amm.bands[i].users)
+                                usersSet.delete(user)
+                                amm.bands[i].users = [...usersSet]
+                            }
+
                             const totalShares = formatWei(parseWei(amm.totalShares[i]) - parseWei(s))
                             if (totalShares === '0') {
                                 delete amm.totalShares[i]
@@ -210,7 +237,7 @@ export class LlammaFetcher {
         while (true) {
             const markets = await this.fetchLlammaMarkets(lastBlock)
             lastBlock = await this.provider.getBlockNumber()
-            console.log(`Found LLAMMA markets: ${JSON.stringify(markets)}`)
+            console.log(`Found LLAMMA markets: ${JSON.stringify(markets, null, 2)}`)
 
             for (const [id, market] of Object.entries(markets)) {
                 if (this.markets[id]) {

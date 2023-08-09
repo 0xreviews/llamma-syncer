@@ -12,6 +12,7 @@ export type Amm = {
 export type Band = {
     x: string
     y: string
+    users: Array<string>
 }
 
 export type Metadata = {

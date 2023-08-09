@@ -1,5 +1,6 @@
 import _ from 'lodash'
 import express, { Request, Response } from 'express'
+import { getAddress } from 'ethers'
 import { Amm, Database } from './datastore'
 import { LlammaFetcher } from './llamma'
 
@@ -22,7 +23,7 @@ export class RestApi {
         })
 
         this.app.get('/pool/:address', async (req: Request, res: Response) => {
-            const address = req.params.address
+            const address = getAddress(req.params.address)
             const amm = await this.db.getLatestAmm(address)
             if (!amm) {
                 res.status(404).send(`Amm(${address}) not found`)
@@ -32,7 +33,7 @@ export class RestApi {
         })
 
         this.app.get('/pool/:address/block_number/:blockNumber', async (req: Request, res: Response) => {
-            const address = req.params.address
+            const address = getAddress(req.params.address)
             const blockNumber = req.params.blockNumber
             let amm: Amm | null
             try {

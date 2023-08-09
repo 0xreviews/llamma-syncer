@@ -120,11 +120,10 @@ export class LlammaFetcher {
         const depositTopic = (await contract.filters.Deposit().getTopicFilter())[0] as string
         const withdrawTopic = (await contract.filters.Withdraw().getTopicFilter())[0] as string
 
+        let latestAmm = await this.db.getLatestAmm(market.amm)
         // eslint-disable-next-line no-constant-condition
         while (true) {
-            const amm = await this.db.getLatestAmm(market.amm)
-
-            const fromBlock = amm ? amm.blockNumber + 1 : market.createdAtBlock
+            const fromBlock = latestAmm ? latestAmm.blockNumber + 1 : market.createdAtBlock
             const latestBlock = await this.provider.getBlockNumber()
             if (latestBlock < fromBlock + 300) {
                 console.log(`waiting for new blocks in pool ${market.amm}`)
@@ -163,10 +162,9 @@ export class LlammaFetcher {
             for (const blockNumber of blockNumbers) {
                 const bands = await this.fetchBands(market.amm, blockNumber)
                 const amm = { blockNumber, bands, totalShares: {}, userShares: {} } as Amm
-                const lastAmm = await this.db.findAmmLeThanBlock(market.amm, blockNumber)
-                if (lastAmm) {
-                    amm.totalShares = lastAmm.totalShares
-                    amm.userShares = lastAmm.userShares
+                if (latestAmm) {
+                    amm.totalShares = latestAmm.totalShares
+                    amm.userShares = latestAmm.userShares
                 }
 
                 const logsInBlock = _.sortBy(logsMap[blockNumber].logs, 'index')
@@ -188,13 +186,19 @@ export class LlammaFetcher {
                         }
                     } else {
                         for (const [i, s] of Object.entries(amm.userShares[user])) {
-                            amm.totalShares[i] = formatWei(parseWei(amm.totalShares[i]) - parseWei(s))
+                            const totalShares = formatWei(parseWei(amm.totalShares[i]) - parseWei(s))
+                            if (totalShares === '0') {
+                                delete amm.totalShares[i]
+                            } else {
+                                amm.totalShares[i] = totalShares
+                            }
                         }
                         delete amm.userShares[user]
                     }
                 }
 
                 await this.db.storeAmm(amm, market.amm)
+                latestAmm = Object.assign({}, amm)
             }
         }
     }

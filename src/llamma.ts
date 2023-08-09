@@ -1,5 +1,5 @@
 import _ from 'lodash'
-import { ethers, Contract, JsonRpcProvider, fromTwos, getNumber, formatEther, parseEther } from 'ethers'
+import { ethers, Contract, JsonRpcProvider, fromTwos, getNumber, formatEther, parseUnits, formatUnits } from 'ethers'
 
 import { Multicaller__factory, Multicaller, Llamma__factory } from './types'
 import { Database, Band, Amm } from './datastore'
@@ -17,6 +17,18 @@ interface Market {
 
 function parseIn256(bytes: string, name?: string): number {
     return getNumber(fromTwos(bytes, 256), name)
+}
+
+function bytes32ToAddress(bytes: string): string {
+    return '0x' + bytes.substring(26)
+}
+
+function parseWei(value: string): bigint {
+    return parseUnits(value, 'wei')
+}
+
+function formatWei(value: bigint): string {
+    return formatUnits(value, 'wei')
 }
 
 export class LlammaFetcher {
@@ -47,7 +59,7 @@ export class LlammaFetcher {
         const abiCoder = ethers.AbiCoder.defaultAbiCoder()
         const markets: Record<string, Market> = {}
         logs.map(log => {
-            const collateral = log.topics[1].substring(26)
+            const collateral = bytes32ToAddress(log.topics[1])
             const [controller, amm, monetaryPolicy, id] = abiCoder.decode(
                 ['address', 'address', 'address', 'uint256'],
                 log.data,
@@ -160,7 +172,7 @@ export class LlammaFetcher {
                 const logsInBlock = _.sortBy(logsMap[blockNumber].logs, 'index')
                 for (const log of logsInBlock) {
                     const logName = log.topics[0]
-                    const user = '0x' + log.topics[1].substring(26)
+                    const user = bytes32ToAddress(log.topics[1])
                     if (logName == depositTopic) {
                         amm.userShares[user] = amm.userShares[user] ?? {}
                         const [amount, n1, n2] = abiCoder.decode(['uint256', 'int256', 'int256'], log.data)
@@ -168,15 +180,15 @@ export class LlammaFetcher {
 
                         for (let i = n1; i <= n2; i++) {
                             amm.totalShares[i] = amm.totalShares[i]
-                                ? formatEther(parseEther(amm.totalShares[i]) + amountPerBand)
-                                : formatEther(amountPerBand)
+                                ? formatWei(parseWei(amm.totalShares[i]) + amountPerBand)
+                                : formatWei(amountPerBand)
                             amm.userShares[user][i] = amm.userShares[user][i]
-                                ? formatEther(parseEther(amm.userShares[user][i])) + amountPerBand
-                                : formatEther(amountPerBand)
+                                ? formatWei(parseWei(amm.userShares[user][i]) + amountPerBand)
+                                : formatWei(amountPerBand)
                         }
                     } else {
                         for (const [i, s] of Object.entries(amm.userShares[user])) {
-                            amm.totalShares[i] = formatEther(parseEther(amm.totalShares[i]) - parseEther(s))
+                            amm.totalShares[i] = formatWei(parseWei(amm.totalShares[i]) - parseWei(s))
                         }
                         delete amm.userShares[user]
                     }

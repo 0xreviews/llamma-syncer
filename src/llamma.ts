@@ -186,41 +186,52 @@ export class LlammaFetcher {
                     amm.bands = bands
                 }
 
-                const logsInBlock = _.sortBy(logsMap[blockNumber].logs, 'index')
-                for (const log of logsInBlock) {
-                    const logName = log.topics[0]
+                const userLogs: Record<string, ethers.Log[]> = {}
+                logsMap[blockNumber].logs.map(log => {
                     const user = bytes32ToAddress(log.topics[1])
-                    if (logName == depositTopic) {
-                        amm.userShares[user] = amm.userShares[user] ?? {}
-                        const [amount, n1, n2] = abiCoder.decode(['uint256', 'int256', 'int256'], log.data)
-                        const amountPerBand = (amount as bigint) / ((n2 as bigint) - (n1 as bigint) + BigInt(1))
+                    userLogs[user] = userLogs[user] ?? []
+                    userLogs[user].push(log)
+                })
 
-                        for (let i = n1; i <= n2; i++) {
-                            amm.bands[i].users = amm.bands[i].users ? _.uniq([...amm.bands[i].users, user]) : [user]
+                for (const [user, logs] of Object.entries(userLogs)) {
+                    const sortedLogs = _.sortBy(logs, log => log.index)
+                    const lastWithdraIndex = _.findLastIndex(sortedLogs, log => log.topics[0] == withdrawTopic)
+                    const startIndex = lastWithdraIndex == -1 ? 0 : lastWithdraIndex
 
-                            amm.totalShares[i] = amm.totalShares[i]
-                                ? formatWei(parseWei(amm.totalShares[i]) + amountPerBand)
-                                : formatWei(amountPerBand)
-                            amm.userShares[user][i] = amm.userShares[user][i]
-                                ? formatWei(parseWei(amm.userShares[user][i]) + amountPerBand)
-                                : formatWei(amountPerBand)
-                        }
-                    } else {
-                        for (const [i, s] of Object.entries(amm.userShares[user])) {
-                            if (amm.bands[i]) {
-                                const usersSet = new Set(amm.bands[i].users)
-                                usersSet.delete(user)
-                                amm.bands[i].users = [...usersSet]
+                    for (const log of sortedLogs.slice(startIndex)) {
+                        const logName = log.topics[0]
+                        if (logName == depositTopic) {
+                            amm.userShares[user] = amm.userShares[user] ?? {}
+                            const [amount, n1, n2] = abiCoder.decode(['uint256', 'int256', 'int256'], log.data)
+                            const amountPerBand = (amount as bigint) / ((n2 as bigint) - (n1 as bigint) + BigInt(1))
+
+                            for (let i = n1; i <= n2; i++) {
+                                amm.bands[i].users = amm.bands[i].users ? _.uniq([...amm.bands[i].users, user]) : [user]
+
+                                amm.totalShares[i] = amm.totalShares[i]
+                                    ? formatWei(parseWei(amm.totalShares[i]) + amountPerBand)
+                                    : formatWei(amountPerBand)
+                                amm.userShares[user][i] = amm.userShares[user][i]
+                                    ? formatWei(parseWei(amm.userShares[user][i]) + amountPerBand)
+                                    : formatWei(amountPerBand)
                             }
+                        } else {
+                            for (const [i, s] of Object.entries(amm.userShares[user])) {
+                                if (amm.bands[i]) {
+                                    const usersSet = new Set(amm.bands[i].users)
+                                    usersSet.delete(user)
+                                    amm.bands[i].users = [...usersSet]
+                                }
 
-                            const totalShares = formatWei(parseWei(amm.totalShares[i]) - parseWei(s))
-                            if (totalShares === '0') {
-                                delete amm.totalShares[i]
-                            } else {
-                                amm.totalShares[i] = totalShares
+                                const totalShares = formatWei(parseWei(amm.totalShares[i]) - parseWei(s))
+                                if (totalShares === '0') {
+                                    delete amm.totalShares[i]
+                                } else {
+                                    amm.totalShares[i] = totalShares
+                                }
                             }
+                            delete amm.userShares[user]
                         }
-                        delete amm.userShares[user]
                     }
                 }
 
